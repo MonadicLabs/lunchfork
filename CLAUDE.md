@@ -743,38 +743,40 @@ python training/train_superres.py \
 
 ## Roadmap
 
-### Phase 1 — Infrastructure + SITL minimal
-- [ ] Structure dépôt + Docker Compose
-- [ ] `shared/comm` : interface + `MqttTransport`
-- [ ] `shared/messages` : schémas Pydantic
-- [ ] `sim-engine` : Friis simple (sans terrain)
-- [ ] `node-sitl` : trajectoire statique, publication mesures
-- [ ] `master` : réception + fenêtre glissante + log
+### Phase 1 — Infrastructure + SITL minimal ✅
+- [x] Structure dépôt + Docker Compose
+- [x] `shared/comm` : interface + `MqttTransport` + `WebSocketTransport`
+- [x] `shared/messages` : schémas Pydantic
+- [x] `sim-engine` : Friis simple (sans terrain)
+- [x] `node-sitl` : trajectoire statique, publication mesures
+- [x] `master` : réception + fenêtre glissante + log
 
-### Phase 2 — Simulation réaliste
-- [ ] ITM dans `sim-engine`
-- [ ] `shared/geo` : MNT SRTM + rasterisation OSM
-- [ ] `node-sitl` : orbite UAV + helix
-- [ ] Génération premier dataset VHF/UHF
+### Phase 2 — Simulation réaliste ✅
+- [x] ITM dans `sim-engine` (simplified Longley-Rice + knife-edge diffraction)
+- [x] `shared/geo` : MNT SRTM fetch + resize bilinéaire
+- [x] `node-sitl` : orbite UAV + helix + GPS replay (GPX/CSV)
+- [x] Génération premier dataset VHF/UHF (`training/generate_dataset.py`)
 
-### Phase 3 — Pipeline ML
-- [ ] Entraînement diffusion sur dataset synthétique
-- [ ] `shared/models` : `DiffusionModel` + backends ONNX/PyTorch
-- [ ] `master` : pipeline coarse
-- [ ] PF basique (random walk)
-- [ ] Évaluation CEP50/CEP90 SITL
+### Phase 3 — Pipeline ML ✅ (stubs + infrastructure complète)
+- [x] `shared/models` : `DiffusionModel` + `SuperResolutionModel` + backends ONNX/PyTorch (stubs si pas de checkpoint)
+- [x] `master` : pipeline coarse→fine avec zoom + SR×4
+- [x] PF basique (random walk) + CV + adaptatif (`pipeline/particle_filter.py`)
+- [x] Publication `TargetLocation` via CommTransport + WebSocket push
+- [x] WebUI : carte + cibles + nœuds + heatmap radio map
+- [ ] Entraînement diffusion sur dataset synthétique (offline, modèle réel)
+- [ ] Évaluation CEP50/CEP90 SITL (nécessite checkpoint réel)
 
-### Phase 4 — Pipeline complet
-- [ ] Zoom coarse→fine
-- [ ] `SuperResolutionModel` + entraînement
-- [ ] PF constant velocity + adaptatif
-- [ ] WebUI : carte + cibles + nœuds + heatmap
-- [ ] Export ONNX + benchmark ARM
+### Phase 4 — Pipeline complet ✅ (infrastructure)
+- [x] Zoom coarse→fine (trigger sur `position_std_m < ZOOM_TRIGGER_STD_M`)
+- [x] `SuperResolutionModel` wrapper + `train_superres.py`
+- [x] PF constant velocity + adaptatif (motion model + sliding window adapt)
+- [x] Export ONNX (`scripts/export_onnx.py`) + benchmark
+- [ ] Checkpoint réel entraîné
 
-### Phase 5 — HITL
-- [ ] `node-hitl` : SoapySDR + FFT + clustering
-- [ ] GPS via gpsd + mode replay IQ
-- [ ] Tests terrain
+### Phase 5 — HITL ✅ (code complet, tests terrain à faire)
+- [x] `node-hitl` : SoapySDR + FFT + clustering fréquentiel
+- [x] GPS via gpsd + NMEA + mode replay IQ (SigMF/raw float32)
+- [ ] Tests terrain avec hardware réel
 
 ### Phase 6 — Extensions
 - [ ] `ZenohTransport` (sans broker)
@@ -782,6 +784,79 @@ python training/train_superres.py \
 - [ ] Orbite hélicoïdale dans PF
 - [ ] Segmentation post radio map (multi-émetteurs même canal)
 - [ ] Tiles OSM offline WebUI
+
+---
+
+## Résultats d'évaluation
+
+### SITL Provence — orbit_uhf (Friis, 1 UAV + 2 sol, 433 MHz)
+
+| Modèle | CEP50 | CEP90 | RMSE | Notes |
+|--------|-------|-------|------|-------|
+| GridLikelihoodModel (Friis analytique) | **28m** | **60m** | 39m | Convergence immédiate |
+| UNet ITM Provence v3 | 920m | 1411m | 1019m | Mismatch ITM vs Friis simu |
+
+GridLikelihoodModel domine le SITL Friis car il est analytiquement exact. L'UNet ne peut pas battre un modèle qui connaît exactement la physique utilisée.
+
+### POWDER (réel, 462 MHz, campus University of Utah, 5006 samples)
+
+| Modèle | CEP50 | CEP90 | RMSE(t) | Notes |
+|--------|-------|-------|---------|-------|
+| Friis absolu (calibré) | 211m | 806m | 424m | Baseline |
+| Friis différentiel | 162m | 662m | 447m | Sans calibration |
+| UNet POWDER + terrain | **69m** | **97m** | **70m** | In-domain, 3× mieux |
+| UNet ITM Provence v3 | 257m | 519m | 381m | Gap de domaine |
+
+Conclusion : l'UNet apporte une amélioration réelle (3×) sur données réelles si entraîné sur le bon domaine.
+
+### Sim-to-real improvements (implémentés)
+
+1. **Two-ray ground reflection** dans `sim-engine` : actif quand les deux antennes < 50m MSL
+2. **Noise model** dans `generate_dataset.py` : `--shadow-std 6.0 dB`, `--hw-offset-std 3.0 dB`
+3. **Dropout bottleneck** dans `shared/models/unet_arch.py` : `--dropout 0.2` pour régularisation
+
+---
+
+## Stratégie modèle généraliste (en cours)
+
+**Objectif** : un seul UNet déployable sur tous les scénarios HITL sans fine-tune terrain spécifique.
+
+**Principe** : entraîner sur distribution large de domaines physiques réalistes.
+
+- **Propagation** : ITM uniquement (Friis pur exclu — n'existe pas en HITL réel). Two-ray inclus implicitement dans ITM (< 50m MSL).
+- **Terrain** : plusieurs zones géographiques (france, benelux, iberia, alps) via SRTM
+- **Altitude capteur** : 1.5–200m pour couvrir sol + véhicule + UAV
+- **Bruit** : shadow_std 4–8 dB, hw_offset_std 2–5 dB
+- **Fréquence** : 100–900 MHz (VHF + UHF)
+
+Commande de génération prévue :
+```bash
+# Fetch terrain zones manquantes d'abord
+python scripts/fetch_terrain.py --source srtm --bbox -9 36 3 43.5   # iberia
+python scripts/fetch_terrain.py --source srtm --bbox 2.5 49.5 7 53.5  # benelux
+python scripts/fetch_terrain.py --source srtm --bbox 5 44 15 48     # alps (extension est)
+
+# Dataset multi-domaine (~20k scènes)
+PROPAGATION_MODEL=itm python training/generate_dataset.py \
+  --n-scenes 20000 \
+  --terrain-zones france,benelux,iberia,alps \
+  --propagation-model itm \
+  --freq-range 100e6 900e6 \
+  --sensor-alt-min 1.5 --sensor-alt-max 200 \
+  --power-min 5 --power-max 30 \
+  --shadow-std 6 --hw-offset-std 3 \
+  --sigma-m 280 \
+  --output data/datasets/itm_multizone_v1/
+
+# Entraînement
+python training/train_unet.py \
+  --dataset data/datasets/itm_multizone_v1 \
+  --output data/checkpoints/unet_itm_multizone_v1.pt \
+  --epochs 60 --batch-size 64 --base 32 \
+  --loss bce --pos-weight 20 --dropout 0.2
+```
+
+**Note docker-compose** : `MODEL_UNET_PATH` commenté → master utilise `GridLikelihoodModel` (optimal pour SITL Friis). Activer avec `PROPAGATION_MODEL=itm` pour valider l'UNet généraliste.
 
 ---
 

@@ -1,0 +1,44 @@
+name: "UAV orbit VHF 144MHz — longer propagation"
+# VHF 144 MHz (2m amateur band).
+# Longer wavelength → higher diffraction over terrain → harder to localise precisely.
+# Target accuracy: CEP50 < 500m with 2 orbits.
+# Useful for comparing VHF vs UHF localisation quality under same geometry.
+duration_sec: 600
+
+emitters:
+  - id: target-1
+    lat: 43.530
+    lon: 5.450
+    alt_m: 5
+    freq_hz: 144000000     # 144 MHz VHF
+    power_dbm: 20          # Higher power typical for VHF handhelds
+    trajectory: static
+
+nodes:
+  - id: uav-1
+    type: uav
+    trajectory:
+      type: orbit
+      center_lat: 43.535
+      center_lon: 5.455
+      radius_m: 800
+      alt_m: 120
+      period_sec: 120
+      helix: false
+
+  - id: ground-1
+    type: ground
+    lat: 43.510
+    lon: 5.430
+    alt_m: 180
+
+  - id: ground-2
+    type: ground
+    lat: 43.555
+    lon: 5.480
+    alt_m: 220
+
+eval:
+  ground_truth_emitter: target-1
+  metrics: [rmse_m, cep50, cep90, convergence_time_sec]
+  convergence_threshold_m: 500

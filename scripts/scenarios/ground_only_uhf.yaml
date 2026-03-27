@@ -1,0 +1,45 @@
+name: "Ground sensors only UHF 433MHz — TDOA-style"
+# Four ground nodes surrounding the emitter area.
+# No UAV — tests whether ground-only RSSI triangulation converges.
+# Harder than UAV orbit: geometry is fixed, no angular sweep.
+# Expected CEP50: 300–800m depending on emitter position relative to node geometry.
+duration_sec: 300
+
+emitters:
+  - id: target-1
+    lat: 43.530
+    lon: 5.450
+    alt_m: 5
+    freq_hz: 433920000
+    power_dbm: 10
+    trajectory: static
+
+nodes:
+  - id: ground-north
+    type: ground
+    lat: 43.570
+    lon: 5.450
+    alt_m: 200
+
+  - id: ground-south
+    type: ground
+    lat: 43.490
+    lon: 5.450
+    alt_m: 150
+
+  - id: ground-east
+    type: ground
+    lat: 43.530
+    lon: 5.530
+    alt_m: 160
+
+  - id: ground-west
+    type: ground
+    lat: 43.530
+    lon: 5.370
+    alt_m: 170
+
+eval:
+  ground_truth_emitter: target-1
+  metrics: [rmse_m, cep50, cep90, convergence_time_sec]
+  convergence_threshold_m: 500

@@ -1,0 +1,48 @@
+name: "Dual UAV orbit UHF 433MHz — faster convergence"
+# Two UAV orbits with 90° phase offset around the same centre.
+# Expected: faster convergence than single orbit (~1 orbit = 120s vs 2-3 orbits).
+# Useful for testing the effect of observation density on localisation speed.
+duration_sec: 400
+
+emitters:
+  - id: target-1
+    lat: 43.530
+    lon: 5.450
+    alt_m: 5
+    freq_hz: 433920000
+    power_dbm: 10
+    trajectory: static
+
+nodes:
+  - id: uav-1
+    type: uav
+    trajectory:
+      type: orbit
+      center_lat: 43.535
+      center_lon: 5.455
+      radius_m: 800
+      alt_m: 120
+      period_sec: 120
+      helix: false
+
+  - id: uav-2
+    type: uav
+    trajectory:
+      type: orbit
+      center_lat: 43.535   # Same centre, 90° phase offset achieved via start time
+      center_lon: 5.455
+      radius_m: 600         # Smaller radius — different geometry
+      alt_m: 100
+      period_sec: 100
+      helix: false
+
+  - id: ground-1
+    type: ground
+    lat: 43.510
+    lon: 5.430
+    alt_m: 180
+
+eval:
+  ground_truth_emitter: target-1
+  metrics: [rmse_m, cep50, cep90, convergence_time_sec]
+  convergence_threshold_m: 200

@@ -1,0 +1,53 @@
+# Data directories
+data/terrain/
+data/datasets/
+data/checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Results
+results/
+
+# Model checkpoints
+*.onnx
+*.pt
+*.pth
+
+# IQ recordings
+*.iq
+*.sigmf-data
+*.sigmf-meta
+
+# Secrets / config overrides
+config.local.env
+*.secret

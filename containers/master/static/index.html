@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>lunchfork — RF Localisation</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; height: 100vh; overflow: hidden; }
+
+    #map { flex: 1; }
+
+    #sidebar {
+      width: 320px; min-width: 260px; background: #16213e;
+      display: flex; flex-direction: column; border-left: 1px solid #0f3460;
+      overflow: hidden;
+    }
+
+    #header {
+      padding: 12px 16px; background: #0f3460;
+      border-bottom: 1px solid #e94560;
+    }
+    #header h1 { font-size: 1.1rem; color: #e94560; letter-spacing: 2px; text-transform: uppercase; }
+    #header .subtitle { font-size: 0.7rem; color: #888; margin-top: 2px; }
+
+    #status-bar {
+      padding: 8px 16px; background: #0a0a1a; font-size: 0.75rem;
+      display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #0f3460;
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot-green { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+    .dot-red { background: #ff4466; box-shadow: 0 0 6px #ff4466; }
+    .dot-yellow { background: #ffcc00; box-shadow: 0 0 6px #ffcc00; }
+
+    #panels { flex: 1; overflow-y: auto; }
+
+    .panel { border-bottom: 1px solid #0f3460; }
+    .panel-header {
+      padding: 10px 16px; cursor: pointer; background: #1a2a4a;
+      display: flex; justify-content: space-between; align-items: center;
+      user-select: none; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px;
+    }
+    .panel-header:hover { background: #1e3060; }
+    .panel-body { padding: 8px 16px; }
+    .panel-body.collapsed { display: none; }
+
+    .node-item {
+      padding: 6px 0; border-bottom: 1px solid #0f3460; font-size: 0.78rem;
+      display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center;
+    }
+    .node-item:last-child { border-bottom: none; }
+    .node-name { font-weight: 600; color: #7ec8e3; }
+    .node-meta { color: #888; font-size: 0.7rem; }
+    .node-rate { color: #00ff88; font-size: 0.7rem; }
+
+    .target-item {
+      padding: 6px 0; border-bottom: 1px solid #0f3460; font-size: 0.78rem;
+    }
+    .target-item:last-child { border-bottom: none; }
+    .target-id { font-weight: 600; color: #e94560; }
+    .target-pos { color: #888; font-size: 0.7rem; }
+    .target-unc { color: #ffcc00; font-size: 0.7rem; }
+
+    .channel-item {
+      padding: 4px 0; font-size: 0.75rem; display: flex; justify-content: space-between;
+      border-bottom: 1px solid #0f3460;
+    }
+    .channel-item:last-child { border-bottom: none; }
+    .channel-freq { color: #7ec8e3; }
+    .channel-n { color: #888; }
+
+    #log-panel { border-top: 1px solid #0f3460; }
+    #log-body {
+      height: 140px; overflow-y: auto; padding: 4px 12px;
+      font-size: 0.7rem; font-family: 'Consolas', monospace;
+      background: #0a0a1a;
+    }
+    .log-line { padding: 1px 0; border-bottom: 1px solid #1a1a2e; color: #aaa; }
+    .log-line.rssi { color: #7ec8e3; }
+    .log-line.status { color: #00ff88; }
+    .log-line.err { color: #ff4466; }
+
+    #map-controls {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      z-index: 1000; background: rgba(22, 33, 62, 0.9); border: 1px solid #0f3460;
+      border-radius: 6px; padding: 8px 16px; display: flex; gap: 16px; align-items: center;
+      font-size: 0.75rem;
+    }
+    #map-controls label { color: #888; }
+    #heatmap-opacity { width: 80px; }
+
+    .leaflet-container { background: #1a1a2e; }
+
+    #no-nodes { color: #444; font-style: italic; padding: 8px 0; font-size: 0.78rem; }
+    #no-targets { color: #444; font-style: italic; padding: 8px 0; font-size: 0.78rem; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="map-controls">
+    <label>Heatmap opacity</label>
+    <input type="range" id="heatmap-opacity" min="0" max="100" value="60" />
+    <label><input type="checkbox" id="show-tracks" checked /> Tracks</label>
+    <label><input type="checkbox" id="show-uncertainty" checked /> Uncertainty</label>
+  </div>
+
+  <div id="sidebar">
+    <div id="header">
+      <h1>lunchfork</h1>
+      <div class="subtitle">RF Passive Localisation</div>
+    </div>
+
+    <div id="status-bar">
+      <span class="status-dot dot-red" id="ws-dot"></span>
+      <span id="ws-label">Disconnected</span>
+      <span style="flex:1"></span>
+      <span id="msg-count">0 msg</span>
+    </div>
+
+    <div id="panels">
+      <!-- Nodes panel -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel('nodes')">
+          Nodes <span id="nodes-badge">0</span> <span id="nodes-arrow">▼</span>
+        </div>
+        <div class="panel-body" id="nodes-body">
+          <div id="no-nodes">No nodes detected</div>
+          <div id="nodes-list"></div>
+        </div>
+      </div>
+
+      <!-- Targets panel -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel('targets')">
+          Targets <span id="targets-badge">0</span> <span id="targets-arrow">▼</span>
+        </div>
+        <div class="panel-body" id="targets-body">
+          <div id="no-targets">No targets tracked</div>
+          <div id="targets-list"></div>
+        </div>
+      </div>
+
+      <!-- Channels panel -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel('channels')">
+          Channels <span id="channels-badge">0</span> <span id="channels-arrow">▼</span>
+        </div>
+        <div class="panel-body" id="channels-body">
+          <div id="channels-list"><div style="color:#444;font-style:italic;font-size:0.78rem;padding:8px 0;">No channels detected</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log panel -->
+    <div id="log-panel">
+      <div class="panel-header" onclick="togglePanel('log')" style="background:#0a0a1a;">
+        Log <span id="log-arrow">▼</span>
+      </div>
+      <div id="log-body"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // -----------------------------------------------------------------------
+    // Map setup
+    // -----------------------------------------------------------------------
+    const map = L.map('map', {
+      center: [43.530, 5.450],
+      zoom: 12,
+      zoomControl: true,
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+
+    // -----------------------------------------------------------------------
+    // State
+    // -----------------------------------------------------------------------
+    const nodes = {};       // node_id → { marker, data }
+    const targets = {};     // target_id → { marker, circle, data }
+    const channels = {};    // channel_id → FreqChannel
+    const recentRssi = {}; // node_id → [last N rssi values]
+    let msgCount = 0;
+
+    // -----------------------------------------------------------------------
+    // Icon factories
+    // -----------------------------------------------------------------------
+    function nodeIcon(nodeType, active) {
+      const colours = { uav: '#7ec8e3', ground: '#00ff88', vehicle: '#ffcc00' };
+      const colour = active ? (colours[nodeType] || '#888') : '#555';
+      const shapes = { uav: '▲', ground: '●', vehicle: '◆' };
+      const symbol = shapes[nodeType] || '●';
+      return L.divIcon({
+        className: '',
+        html: `<div style="color:${colour};font-size:18px;filter:drop-shadow(0 0 4px ${colour});line-height:1;">${symbol}</div>`,
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+    }
+
+    function targetIcon(state) {
+      const colours = { init: '#ffcc00', confirmed: '#e94560', lost: '#555' };
+      const colour = colours[state] || '#e94560';
+      return L.divIcon({
+        className: '',
+        html: `<div style="color:${colour};font-size:22px;filter:drop-shadow(0 0 6px ${colour});line-height:1;">✕</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // Node handling
+    // -----------------------------------------------------------------------
+    function updateNode(data) {
+      const id = data.node_id;
+      const latlng = [data.lat, data.lon];
+
+      if (!nodes[id]) {
+        const marker = L.marker(latlng, { icon: nodeIcon(data.node_type, true) })
+          .bindTooltip(id, { permanent: false, direction: 'top' })
+          .addTo(map);
+        nodes[id] = { marker, data };
+      } else {
+        nodes[id].marker.setLatLng(latlng);
+        nodes[id].marker.setIcon(nodeIcon(data.node_type, true));
+        nodes[id].data = { ...nodes[id].data, ...data };
+      }
+    }
+
+    function renderNodesPanel() {
+      const list = document.getElementById('nodes-list');
+      const noNodes = document.getElementById('no-nodes');
+      const badge = document.getElementById('nodes-badge');
+      const ids = Object.keys(nodes);
+      badge.textContent = ids.length;
+
+      if (ids.length === 0) {
+        noNodes.style.display = '';
+        list.innerHTML = '';
+        return;
+      }
+      noNodes.style.display = 'none';
+      list.innerHTML = ids.map(id => {
+        const n = nodes[id].data;
+        const rssi = n.rssi_dbm !== undefined ? `${n.rssi_dbm.toFixed(1)} dBm` : '';
+        const rate = n.rssi_rate_hz !== undefined ? `${n.rssi_rate_hz} Hz` : '';
+        return `<div class="node-item">
+          <div class="status-dot ${n.comm_ok !== false ? 'dot-green' : 'dot-red'}"></div>
+          <div>
+            <div class="node-name">${id}</div>
+            <div class="node-meta">${n.node_type || ''} · ${rssi}</div>
+          </div>
+          <div class="node-rate">${rate}</div>
+        </div>`;
+      }).join('');
+    }
+
+    // -----------------------------------------------------------------------
+    // Target handling
+    // -----------------------------------------------------------------------
+    function updateTarget(data) {
+      const id = data.target_id;
+      const latlng = [data.position.lat, data.position.lon];
+      const unc = data.uncertainty_m || 500;
+
+      if (!targets[id]) {
+        const marker = L.marker(latlng, { icon: targetIcon(data.track_state) }).addTo(map);
+        marker.bindTooltip(`Target: ${id}`, { permanent: false });
+        const circle = L.circle(latlng, {
+          radius: unc,
+          color: '#e94560',
+          fillColor: '#e94560',
+          fillOpacity: 0.1,
+          weight: 1,
+          dashArray: '4,4',
+        }).addTo(map);
+        targets[id] = { marker, circle, data };
+      } else {
+        targets[id].marker.setLatLng(latlng);
+        targets[id].marker.setIcon(targetIcon(data.track_state));
+        targets[id].circle.setLatLng(latlng);
+        targets[id].circle.setRadius(unc);
+        targets[id].data = data;
+      }
+    }
+
+    function renderTargetsPanel() {
+      const list = document.getElementById('targets-list');
+      const noTargets = document.getElementById('no-targets');
+      const badge = document.getElementById('targets-badge');
+      const ids = Object.keys(targets);
+      badge.textContent = ids.length;
+
+      if (ids.length === 0) {
+        noTargets.style.display = '';
+        list.innerHTML = '';
+        return;
+      }
+      noTargets.style.display = 'none';
+      list.innerHTML = ids.map(id => {
+        const t = targets[id].data;
+        return `<div class="target-item">
+          <div class="target-id">${id}</div>
+          <div class="target-pos">${t.position.lat.toFixed(5)}, ${t.position.lon.toFixed(5)}</div>
+          <div class="target-unc">± ${Math.round(t.uncertainty_m)} m · ${t.track_state}</div>
+        </div>`;
+      }).join('');
+    }
+
+    // -----------------------------------------------------------------------
+    // Channels panel
+    // -----------------------------------------------------------------------
+    function updateChannels(channelList) {
+      const container = document.getElementById('channels-list');
+      const badge = document.getElementById('channels-badge');
+      badge.textContent = channelList.length;
+
+      if (channelList.length === 0) {
+        container.innerHTML = '<div style="color:#444;font-style:italic;font-size:0.78rem;padding:8px 0;">No channels detected</div>';
+        return;
+      }
+      container.innerHTML = channelList.map(ch => {
+        const mhz = (ch.center_hz / 1e6).toFixed(3);
+        const bw_khz = (ch.bandwidth_hz / 1e3).toFixed(0);
+        const label = ch.label || '';
+        return `<div class="channel-item">
+          <span class="channel-freq">${mhz} MHz ${label ? '· ' + label : ''}</span>
+          <span class="channel-n">BW ${bw_khz} kHz</span>
+        </div>`;
+      }).join('');
+    }
+
+    // -----------------------------------------------------------------------
+    // Log
+    // -----------------------------------------------------------------------
+    function addLog(text, cls) {
+      const el = document.getElementById('log-body');
+      const line = document.createElement('div');
+      line.className = `log-line ${cls || ''}`;
+      const now = new Date().toLocaleTimeString();
+      line.textContent = `[${now}] ${text}`;
+      el.prepend(line);
+      // Keep last 200 lines
+      while (el.children.length > 200) el.removeChild(el.lastChild);
+    }
+
+    // -----------------------------------------------------------------------
+    // WebSocket
+    // -----------------------------------------------------------------------
+    let ws = null;
+    let reconnectTimer = null;
+
+    function wsConnect() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${proto}//${location.hostname}:${location.port}/ws`;
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        document.getElementById('ws-dot').className = 'status-dot dot-green';
+        document.getElementById('ws-label').textContent = 'Connected';
+        addLog('WebSocket connected', 'status');
+        if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+      };
+
+      ws.onclose = () => {
+        document.getElementById('ws-dot').className = 'status-dot dot-red';
+        document.getElementById('ws-label').textContent = 'Disconnected';
+        addLog('WebSocket disconnected — reconnecting…', 'err');
+        if (!reconnectTimer) reconnectTimer = setInterval(wsConnect, 3000);
+      };
+
+      ws.onerror = (e) => {
+        addLog('WebSocket error', 'err');
+      };
+
+      ws.onmessage = (evt) => {
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch { return; }
+        handleMessage(msg);
+      };
+    }
+
+    function handleMessage(msg) {
+      msgCount++;
+      document.getElementById('msg-count').textContent = `${msgCount} msg`;
+
+      if (msg.type === 'snapshot') {
+        msg.nodes.forEach(n => updateNode(n));
+        msg.targets.forEach(t => updateTarget(t));
+        updateChannels(msg.channels || []);
+        renderNodesPanel();
+        renderTargetsPanel();
+        return;
+      }
+
+      if (msg.type === 'node_rssi') {
+        updateNode(msg);
+        renderNodesPanel();
+        addLog(`RSSI ${msg.node_id} @ ${(msg.freq_hz/1e6).toFixed(3)}MHz: ${msg.rssi_dbm.toFixed(1)} dBm`, 'rssi');
+        return;
+      }
+
+      if (msg.type === 'node_status') {
+        if (nodes[msg.node_id]) {
+          nodes[msg.node_id].data = { ...nodes[msg.node_id].data, ...msg };
+        }
+        renderNodesPanel();
+        addLog(`Status ${msg.node_id}: ${msg.rssi_rate_hz} Hz`, 'status');
+        return;
+      }
+
+      if (msg.type === 'target_location') {
+        updateTarget(msg);
+        renderTargetsPanel();
+        addLog(`Target ${msg.target_id} ± ${Math.round(msg.uncertainty_m)}m`, '');
+        return;
+      }
+
+      if (msg.type === 'channels_update') {
+        updateChannels(msg.channels || []);
+        return;
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Panel toggle
+    // -----------------------------------------------------------------------
+    function togglePanel(name) {
+      const body = document.getElementById(`${name}-body`);
+      const arrow = document.getElementById(`${name}-arrow`);
+      if (!body) return;
+      const collapsed = body.classList.toggle('collapsed');
+      if (arrow) arrow.textContent = collapsed ? '►' : '▼';
+    }
+
+    // -----------------------------------------------------------------------
+    // Radio map heatmap rendering
+    // -----------------------------------------------------------------------
+    const heatmapLayers = {};  // channel_id → { layer, canvas }
+
+    function renderRadioMapHeatmap(channelId, bbox, shape, dataB64, opacityPct) {
+      // Decode base64 float32 array
+      const raw = atob(dataB64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      const floats = new Float32Array(bytes.buffer);
+      const [H, W] = shape;
+
+      // Create canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      const imgData = ctx.createImageData(W, H);
+
+      // Find min/max for normalisation
+      let vmin = Infinity, vmax = -Infinity;
+      for (let i = 0; i < floats.length; i++) {
+        if (floats[i] < vmin) vmin = floats[i];
+        if (floats[i] > vmax) vmax = floats[i];
+      }
+      const range = vmax - vmin || 1;
+
+      // Colour map: blue (low) → red (high)
+      for (let i = 0; i < floats.length; i++) {
+        const t = (floats[i] - vmin) / range;  // 0–1
+        // Heat colour: cold=blue, warm=red
+        const r = Math.round(255 * Math.max(0, 2 * t - 1));
+        const g = Math.round(255 * Math.max(0, 1 - Math.abs(2 * t - 1)));
+        const b = Math.round(255 * Math.max(0, 1 - 2 * t));
+        const alpha = Math.round((opacityPct / 100) * 200);
+        imgData.data[i * 4 + 0] = r;
+        imgData.data[i * 4 + 1] = g;
+        imgData.data[i * 4 + 2] = b;
+        imgData.data[i * 4 + 3] = alpha;
+      }
+      ctx.putImageData(imgData, 0, 0);
+
+      // Remove old layer
+      if (heatmapLayers[channelId]) {
+        map.removeLayer(heatmapLayers[channelId].layer);
+      }
+
+      // Add image overlay
+      const bounds = [[bbox.lat_min, bbox.lon_min], [bbox.lat_max, bbox.lon_max]];
+      const layer = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 1.0 });
+      layer.addTo(map);
+      heatmapLayers[channelId] = { layer, canvas };
+    }
+
+    async function fetchAndRenderHeatmap(channelId, freqHz, opacityPct) {
+      try {
+        const resp = await fetch(`/api/radiomap/${freqHz}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.data_b64 && data.shape) {
+          renderRadioMapHeatmap(channelId, data.bbox, data.shape, data.data_b64, opacityPct);
+        }
+      } catch {}
+    }
+
+    // -----------------------------------------------------------------------
+    // Heatmap opacity slider
+    // -----------------------------------------------------------------------
+    document.getElementById('heatmap-opacity').addEventListener('input', function() {
+      const opacityPct = parseInt(this.value);
+      // Re-render all heatmap layers with new opacity
+      Object.keys(heatmapLayers).forEach(channelId => {
+        const layer = heatmapLayers[channelId];
+        if (layer) map.removeLayer(layer.layer);
+        delete heatmapLayers[channelId];
+      });
+      // Trigger re-fetch
+      fetchAllHeatmaps(opacityPct);
+    });
+
+    async function fetchAllHeatmaps(opacityPct) {
+      try {
+        const resp = await fetch('/api/channels');
+        const chs = await resp.json();
+        for (const ch of chs) {
+          await fetchAndRenderHeatmap(ch.channel_id, ch.center_hz, opacityPct);
+        }
+      } catch {}
+    }
+
+    // -----------------------------------------------------------------------
+    // Init
+    // -----------------------------------------------------------------------
+    wsConnect();
+
+    // Periodically fetch /api/health to get channel updates and heatmaps
+    setInterval(async () => {
+      try {
+        const resp = await fetch('/api/health');
+        const data = await resp.json();
+        updateChannels(data.channels || []);
+      } catch {}
+    }, 5000);
+
+    setInterval(async () => {
+      const opacityPct = parseInt(document.getElementById('heatmap-opacity').value);
+      if (opacityPct > 0) await fetchAllHeatmaps(opacityPct);
+    }, 15000);
+  </script>
+</body>
+</html>

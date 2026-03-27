@@ -1,0 +1,33 @@
+[Unit]
+Description=lunchfork node-hitl — SDR sensing node
+Documentation=https://github.com/monadic-labs/lunchfork
+After=network.target gpsd.service
+Wants=gpsd.service
+
+[Service]
+Type=simple
+User=lunchfork
+Group=lunchfork
+WorkingDirectory=/opt/lunchfork/app
+EnvironmentFile=/etc/lunchfork/config.env
+ExecStart=/opt/lunchfork/venv/bin/python main.py
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lunchfork-node
+
+# Allow USB device access for SDR
+SupplementaryGroups=plugdev dialout
+
+# Security
+NoNewPrivileges=yes
+PrivateTmp=yes
+ReadWritePaths=/var/log/lunchfork /opt/lunchfork /etc/lunchfork
+
+# Minimal RAM usage for ARM
+MemoryHigh=300M
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

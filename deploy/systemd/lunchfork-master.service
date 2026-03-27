@@ -1,0 +1,33 @@
+[Unit]
+Description=lunchfork master — RF localisation + inference + WebUI
+Documentation=https://github.com/monadic-labs/lunchfork
+After=network.target mosquitto.service
+Requires=mosquitto.service
+
+[Service]
+Type=simple
+User=lunchfork
+Group=lunchfork
+WorkingDirectory=/opt/lunchfork/app
+EnvironmentFile=/etc/lunchfork/config.env
+ExecStart=/opt/lunchfork/venv/bin/python main.py
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lunchfork-master
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/log/lunchfork /opt/lunchfork /etc/lunchfork
+PrivateTmp=yes
+
+# Resource limits
+LimitNOFILE=65536
+# Allow enough RAM for inference (4GB+ recommended with GPU)
+MemoryHigh=3G
+MemoryMax=8G
+
+[Install]
+WantedBy=multi-user.target

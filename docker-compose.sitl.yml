@@ -1,0 +1,42 @@
+version: "3.9"
+
+# SITL override — sim-engine active, no HITL nodes
+# Usage: docker compose -f docker-compose.yml -f docker-compose.sitl.yml up
+
+services:
+  sim-engine:
+    environment:
+      PROPAGATION_MODEL: itm
+
+  node-sitl-uav1:
+    environment:
+      TRAJECTORY_ORBIT_HELIX: "false"
+
+  node-sitl-uav2:
+    build:
+      context: .
+      dockerfile: containers/node-sitl/Dockerfile
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      sim-engine:
+        condition: service_healthy
+    volumes:
+      - ./shared:/app/shared:ro
+    environment:
+      COMM_TRANSPORT: mqtt
+      COMM_BROKER_URL: mqtt://mosquitto:1883
+      NODE_ID: sim-uav-2
+      NODE_TYPE: uav
+      TRAJECTORY_TYPE: orbit
+      TRAJECTORY_ORBIT_LAT: "43.530"
+      TRAJECTORY_ORBIT_LON: "5.460"
+      TRAJECTORY_ORBIT_RADIUS_M: "600"
+      TRAJECTORY_ORBIT_ALT_M: "150"
+      TRAJECTORY_ORBIT_PERIOD_SEC: "90"
+      TRAJECTORY_ORBIT_HELIX: "true"
+      SIMENGINE_URL: http://sim-engine:9000
+      UPDATE_RATE_HZ: "1"
+    networks:
+      - lunchfork
+    restart: unless-stopped

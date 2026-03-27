@@ -1,0 +1,38 @@
+name: "Convergence stress — how fast does the PF lock on?"
+# Minimal setup: 1 fast-orbiting UAV, 1 emitter, 1 ground reference.
+# Short orbit period (60s) → dense angular coverage per unit time.
+# Purpose: measure minimum time-to-convergence.
+# Run eval with convergence_threshold_m=200 to get convergence_time_sec.
+duration_sec: 300
+
+emitters:
+  - id: target-1
+    lat: 43.530
+    lon: 5.450
+    alt_m: 5
+    freq_hz: 433920000
+    power_dbm: 10
+    trajectory: static
+
+nodes:
+  - id: uav-fast
+    type: uav
+    trajectory:
+      type: orbit
+      center_lat: 43.535
+      center_lon: 5.455
+      radius_m: 600          # Tighter orbit
+      alt_m: 80
+      period_sec: 60         # Fast orbit: 1 orbit/min
+      helix: false
+
+  - id: ground-ref
+    type: ground
+    lat: 43.510
+    lon: 5.430
+    alt_m: 180
+
+eval:
+  ground_truth_emitter: target-1
+  metrics: [rmse_m, cep50, cep90, convergence_time_sec]
+  convergence_threshold_m: 200

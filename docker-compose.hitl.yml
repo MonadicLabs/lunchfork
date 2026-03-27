@@ -1,0 +1,21 @@
+version: "3.9"
+
+# HITL override — real SDR nodes, no sim-engine
+# Usage: docker compose -f docker-compose.yml -f docker-compose.hitl.yml up
+# Note: node-hitl runs on ARM bare metal, not in Docker normally.
+# This file is for mixed testing (x86 master + simulated hitl node).
+
+services:
+  # Disable simulated nodes in HITL mode
+  node-sitl-uav1:
+    profiles:
+      - sitl-only
+
+  node-sitl-ground1:
+    profiles:
+      - sitl-only
+
+  # Disable sim-engine in pure HITL mode
+  sim-engine:
+    profiles:
+      - sitl-only
